@@ -13,11 +13,17 @@ import zio.{App, ZIO}
 import zio.console._
 import zamblauskas.csv.parser._
 import better.files._
+import com.fasterxml.jackson.annotation.{JsonIgnoreProperties, JsonProperty}
+import com.fasterxml.jackson.core.JsonParser
+import com.fasterxml.jackson.module.scala.ScalaObjectMapper
 import net.ruippeixotog.scalascraper.browser.JsoupBrowser
-
 import net.ruippeixotog.scalascraper.dsl.DSL._
 import net.ruippeixotog.scalascraper.dsl.DSL.Extract._
 import net.ruippeixotog.scalascraper.dsl.DSL.Parse._
+import ujson.StringRenderer
+import upickle.default._
+
+import scala.beans.BeanProperty
 
 //import java.io.jenetics.jpx.GPX
 //import io.jenetics.jpx.GPX
@@ -27,16 +33,45 @@ case class Person(name: String, age: Int, city: Option[String])
 
 case class GpsEntry(latitude: Double, longitude: Double, createdOn: Instant)
 
+@JsonIgnoreProperties(ignoreUnknown = true)
+case class GpsTrack(
+                   @JsonProperty("layout") val layout: String
+//                     @JsonProperty("data") val data: Array[Object]
+                 )
 
 object Main extends App {
   val browser = JsoupBrowser()
 
-  def getDataScriptFromFile(input: File) = ZIO {
-    val result = browser.parseString(input.contentAsString) >> elementList("script")
-    result
-      .filter(_.innerHtml.contains("data"))
-//      .map(_.innerHtml)
-      .foreach(println)
+  def parseRawJson(input: String) = {
+    import com.fasterxml.jackson.databind.ObjectMapper
+    import com.fasterxml.jackson.core.JsonFactory
+    import java.io.FileInputStream
+    val factory = new JsonFactory
+    factory.configure(JsonParser.Feature.ALLOW_UNQUOTED_FIELD_NAMES, true)
+    val jp = factory.createParser(input)
+    val mapper = new ObjectMapper with ScalaObjectMapper
+    val typedResult = mapper.readValue[GpsTrack](jp)
+    println(typedResult)
+
+//    val parsedJson = mapper.readTree(input)
+//    println(parsedJson)
+    jp
+  }
+
+
+//  def parseRawJson(input: String) = {
+//    println(ujson.transform(input, StringRenderer()))
+//  }
+
+  def getRawJsonFromDataScriptInFile(input: File) = ZIO {
+    val result =
+      (browser.parseString(input.contentAsString) >> elementList("script"))
+        .map(_.innerHtml)
+      .filter(_.contains("data"))
+      .map( content => content.dropWhile( _ != '{').reverse.dropWhile( _ != '}').reverse)
+      .map( content => content.drop(1).dropRight(1))
+      .map( content => content.dropWhile( _ != '{').reverse.dropWhile( _ != '}').reverse)
+      .head
     println(result)
     result
   }
@@ -89,8 +124,9 @@ object Main extends App {
       for {
         result <- ZIO {Parser.parse[Person](csv)}
         files <- getInputFiles()
-        fileScript <- getDataScriptFromFile(files(0))
-        _ <- putStrLn(fileScript.toString)
+        rawJsonData <- getRawJsonFromDataScriptInFile(files(0))
+        _ <- ZIO {parseRawJson(rawJsonData) }
+        _ <- putStrLn(rawJsonData.toString)
         gpsResult <- ZIO {Parser.parse[GpsEntry](gpsCsv)}
         _ <- writeGpxDataToFile("testFile")
         _ <- putStrLn(s"CSV conversion result $gpsResult")

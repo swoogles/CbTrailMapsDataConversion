@@ -18,8 +18,12 @@ lazy val root = (project in file("."))
       "zamblauskas" %% "scala-csv-parser" % "0.11.6",
       "io.jenetics" % "jpx" % "1.6.0",
       "net.ruippeixotog" %% "scala-scraper" % "2.2.0",
-      "com.github.pathikrit" %% "better-files" % "3.8.0"
-    )
+      "com.github.pathikrit" %% "better-files" % "3.8.0",
+      "com.lihaoyi" %% "upickle" % "0.8.0",
+      "com.fasterxml.jackson.core" % "jackson-core" % "2.10.1",
+      "com.fasterxml.jackson.core" % "jackson-databind" % "2.10.1",
+        "com.fasterxml.jackson.module" % "jackson-module-scala_2.12" % "2.10.1"
+)
   )
 
 // Refine scalac params from tpolecat
