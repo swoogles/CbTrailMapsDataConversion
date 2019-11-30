@@ -13,7 +13,11 @@ import zio.{App, ZIO}
 import zio.console._
 import zamblauskas.csv.parser._
 import better.files._
-import java.{io => javaIo}
+import net.ruippeixotog.scalascraper.browser.JsoupBrowser
+
+import net.ruippeixotog.scalascraper.dsl.DSL._
+import net.ruippeixotog.scalascraper.dsl.DSL.Extract._
+import net.ruippeixotog.scalascraper.dsl.DSL.Parse._
 
 //import java.io.jenetics.jpx.GPX
 //import io.jenetics.jpx.GPX
@@ -25,11 +29,22 @@ case class GpsEntry(latitude: Double, longitude: Double, createdOn: Instant)
 
 
 object Main extends App {
+  val browser = JsoupBrowser()
+
+  def getDataScriptFromFile(input: File) = ZIO {
+    val result = browser.parseString(input.contentAsString) >> elementList("script")
+    result
+      .filter(_.innerHtml.contains("data"))
+//      .map(_.innerHtml)
+      .foreach(println)
+    println(result)
+    result
+  }
 
   def getInputFiles() = ZIO {
     File("./src/resources").list
       .filter(!_.name.contains("strava_example"))
-      .foreach(println)
+      .toList
   }
 
   def writeGpxDataToFile(fileName: String) = ZIO {
@@ -74,6 +89,8 @@ object Main extends App {
       for {
         result <- ZIO {Parser.parse[Person](csv)}
         files <- getInputFiles()
+        fileScript <- getDataScriptFromFile(files(0))
+        _ <- putStrLn(fileScript.toString)
         gpsResult <- ZIO {Parser.parse[GpsEntry](gpsCsv)}
         _ <- writeGpxDataToFile("testFile")
         _ <- putStrLn(s"CSV conversion result $gpsResult")
