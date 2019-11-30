@@ -16,7 +16,9 @@ lazy val root = (project in file("."))
       "dev.zio"    %% "zio"         % ZioVersion,
       "org.specs2" %% "specs2-core" % Specs2Version % "test",
       "zamblauskas" %% "scala-csv-parser" % "0.11.6",
-      "io.jenetics" % "jpx" % "1.6.0"
+      "io.jenetics" % "jpx" % "1.6.0",
+      "net.ruippeixotog" %% "scala-scraper" % "2.2.0",
+      "com.github.pathikrit" %% "better-files" % "3.8.0"
     )
   )
 

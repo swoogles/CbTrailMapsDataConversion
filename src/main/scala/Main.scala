@@ -12,6 +12,7 @@ import java.time.Instant
 import zio.{App, ZIO}
 import zio.console._
 import zamblauskas.csv.parser._
+import better.files._
 import java.{io => javaIo}
 
 //import java.io.jenetics.jpx.GPX
@@ -24,6 +25,12 @@ case class GpsEntry(latitude: Double, longitude: Double, createdOn: Instant)
 
 
 object Main extends App {
+
+  def getInputFiles() = ZIO {
+    File("./src/resources").list
+      .filter(!_.name.contains("strava_example"))
+      .foreach(println)
+  }
 
   def writeGpxDataToFile(fileName: String) = ZIO {
 //    JavaGPX.writeToFile(
@@ -66,6 +73,7 @@ object Main extends App {
     val logic: ZIO[Console, io.Serializable, Int] =
       for {
         result <- ZIO {Parser.parse[Person](csv)}
+        files <- getInputFiles()
         gpsResult <- ZIO {Parser.parse[GpsEntry](gpsCsv)}
         _ <- writeGpxDataToFile("testFile")
         _ <- putStrLn(s"CSV conversion result $gpsResult")
