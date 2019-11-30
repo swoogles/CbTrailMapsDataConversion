@@ -31,7 +31,7 @@ import scala.beans.BeanProperty
 case class Person(name: String, age: Int, city: Option[String])
 
 
-case class GpsEntry(latitude: Double, longitude: Double, createdOn: Instant)
+case class GpsEntry(latitude: Double, longitude: Double, altitude: Double)
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 case class GpsTrack(
@@ -53,7 +53,7 @@ case class FullGpsPayload(
 object Main extends App {
   val browser = JsoupBrowser()
 
-  def parseRawJson(input: String) = { // with shitty bogus regexes
+  def parseCoordinatesFromRawJson(input: String) = { // with shitty bogus regexes
     import collection.JavaConverters._
     import java.util
     val jso: util.Map[String, AnyRef] = Json.parseJSON(input)
@@ -63,13 +63,22 @@ object Main extends App {
       .filter( entry => entry.getKey == "data")
       .map(_.getValue)
       .head
-    println("Start of data: " + dataValue.toString.take(1200))
     val coordinatesRegex =
       """.*coordinates:\[\[\[(.*)\]\]\].*""".r
-    input.toString match {
-      case coordinatesRegex(coordinates) => println("coordinates: " + coordinates)
-      case unmatched => println("Failed to match.")
+    val formattedCoordinates = input.toString match {
+//      case coordinatesRegex(coordinates) => s"[$coordinates]")
+      case coordinatesRegex(coordinates) => coordinates
     }
+    formattedCoordinates
+      .split("""],\[""")
+      .filter(_.forall(character=>character.isDigit || character == ',' || character == '.' || character == '-')) // Dunno WTF this is doing in the GPS data
+      .map(coords => {
+        println("eh?!?!")
+        val coordFields = coords.split(",")
+//        println(coordFields.mkString(","))
+        GpsEntry(coordFields(0).toDouble, coordFields(1).toDouble, coordFields(2).toDouble)
+      })
+      .foreach(println)
   }
 
   def parseRawJson2(input: String) = {
@@ -153,12 +162,13 @@ object Main extends App {
       for {
         result <- ZIO {Parser.parse[Person](csv)}
         files <- getInputFiles()
+        _ <- putStrLn(files(0).name)
         rawJsonData <- getRawJsonFromDataScriptInFile(files(0))
-        _ <- ZIO {parseRawJson(rawJsonData) }
+        _ <- ZIO {parseCoordinatesFromRawJson(rawJsonData) }
 //        _ <- putStrLn(rawJsonData.toString)
-        gpsResult <- ZIO {Parser.parse[GpsEntry](gpsCsv)}
+//        gpsResult <- ZIO {Parser.parse[GpsEntry](gpsCsv)}
         _ <- writeGpxDataToFile("testFile")
-        _ <- putStrLn(s"CSV conversion result $gpsResult")
+//        _ <- putStrLn(s"CSV conversion result $gpsResult")
       } yield (0)
     logic
       .provide(Environment)
