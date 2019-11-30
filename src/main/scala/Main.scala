@@ -7,7 +7,7 @@ import io.jenetics.jpx.Track
 import io.jenetics.jpx.TrackSegment
 import io.jenetics.jpx.WayPoint
 import java.io
-import java.time.Instant
+import java.time.{Duration, Instant}
 
 import zio.{App, ZIO}
 import zio.console._
@@ -24,9 +24,6 @@ import ujson.StringRenderer
 import upickle.default._
 
 import scala.beans.BeanProperty
-
-//import java.io.jenetics.jpx.GPX
-//import io.jenetics.jpx.GPX
 
 case class Person(name: String, age: Int, city: Option[String])
 
@@ -53,54 +50,40 @@ case class FullGpsPayload(
 object Main extends App {
   val browser = JsoupBrowser()
 
+  def parseStartTimeFromRawJson(input: String) = { // with shitty bogus regexes
+    val coordinatesRegex =
+      """.*startedAt:\"([^\"]*)\".*""".r
+    Instant.parse(
+    input.toString match {
+      case coordinatesRegex(coordinates) => coordinates
+    }
+    )
+  }
+
+  def parseEndTimeFromRawJson(input: String) = { // with shitty bogus regexes
+    val coordinatesRegex =
+      """.*endedAt:\"([^\"]*)\".*""".r
+    Instant.parse(
+    input.toString match {
+      case coordinatesRegex(coordinates) => coordinates
+    }
+    )
+  }
+
   def parseCoordinatesFromRawJson(input: String) = { // with shitty bogus regexes
-    import collection.JavaConverters._
-    import java.util
-    val jso: util.Map[String, AnyRef] = Json.parseJSON(input)
-    val dataValue = jso
-      .entrySet()
-      .asScala
-      .filter( entry => entry.getKey == "data")
-      .map(_.getValue)
-      .head
     val coordinatesRegex =
       """.*coordinates:\[\[\[(.*)\]\]\].*""".r
     val formattedCoordinates = input.toString match {
-//      case coordinatesRegex(coordinates) => s"[$coordinates]")
       case coordinatesRegex(coordinates) => coordinates
     }
     formattedCoordinates
       .split("""],\[""")
       .filter(_.forall(character=>character.isDigit || character == ',' || character == '.' || character == '-')) // Dunno WTF this is doing in the GPS data
       .map(coords => {
-        println("eh?!?!")
         val coordFields = coords.split(",")
-//        println(coordFields.mkString(","))
         GpsEntry(coordFields(0).toDouble, coordFields(1).toDouble, coordFields(2).toDouble)
       })
-      .foreach(println)
   }
-
-  def parseRawJson2(input: String) = {
-    import com.fasterxml.jackson.databind.ObjectMapper
-    import com.fasterxml.jackson.core.JsonFactory
-    import java.io.FileInputStream
-    val factory = new JsonFactory
-    factory.configure(JsonParser.Feature.ALLOW_UNQUOTED_FIELD_NAMES, true)
-    val jp = factory.createParser(input)
-    val mapper = new ObjectMapper with ScalaObjectMapper
-    val typedResult = mapper.readValue[FullGpsPayload](jp)
-    println(typedResult)
-
-//    val parsedJson = mapper.readTree(input)
-//    println(parsedJson)
-    jp
-  }
-
-
-//  def parseRawJson(input: String) = {
-//    println(ujson.transform(input, StringRenderer()))
-//  }
 
   def getRawJsonFromDataScriptInFile(input: File) = ZIO {
     val result =
@@ -122,7 +105,9 @@ object Main extends App {
 
   def writeGpxDataToFile(fileName: String) = ZIO {
 //    JavaGPX.writeToFile(
-    val wayPoint: WayPoint = WayPoint.builder().build(45.2323, 62.2343242)
+    val wayPoint: WayPoint = WayPoint.builder()
+      .ele(23.23)
+      .build(45.2323, 62.2343242)
     val trackSegment: TrackSegment = TrackSegment.builder().addPoint(wayPoint).build()
     val track: Track = Track.builder().addSegment(trackSegment).build()
       val finalGpxValue = GPX.builder()
@@ -164,7 +149,20 @@ object Main extends App {
         files <- getInputFiles()
         _ <- putStrLn(files(0).name)
         rawJsonData <- getRawJsonFromDataScriptInFile(files(0))
-        _ <- ZIO {parseCoordinatesFromRawJson(rawJsonData) }
+        typedGpsCoordinates <- ZIO {parseCoordinatesFromRawJson(rawJsonData) }
+        _ <- putStrLn( "Number of coordinates " + typedGpsCoordinates.length)
+        startedAt <- ZIO { parseStartTimeFromRawJson(rawJsonData) }
+        endedAt <- ZIO { parseEndTimeFromRawJson(rawJsonData) }
+        duration <- ZIO { Duration.between(startedAt, endedAt)}
+        durationPerStep <- ZIO{ duration.dividedBy(typedGpsCoordinates.length) }
+        _ <- ZIO {
+          typedGpsCoordinates
+            .zipWithIndex
+            .map{ case (gpsEntry, index) => startedAt.plus(durationPerStep.multipliedBy(index))}
+            .foreach(println)
+
+        }
+        _ <- putStrLn("Real End time: " + endedAt)
 //        _ <- putStrLn(rawJsonData.toString)
 //        gpsResult <- ZIO {Parser.parse[GpsEntry](gpsCsv)}
         _ <- writeGpxDataToFile("testFile")
