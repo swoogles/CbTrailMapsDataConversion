@@ -8,7 +8,7 @@ import io.jenetics.jpx.WayPoint
 import java.io
 import java.time.{Duration, Instant}
 
-import zio.{App, ZIO}
+import zio.{App, Task, ZIO}
 import zio.console._
 import zamblauskas.csv.parser._
 import better.files._
@@ -72,7 +72,7 @@ object Main extends App {
     result
   }
 
-  def getInputFiles() = ZIO {
+  def getInputFiles(): Task[List[File]] = ZIO {
     File("./src/resources").list
       .filter(!_.name.contains("strava_example"))
       .toList
@@ -92,11 +92,14 @@ object Main extends App {
         case (builder, gpsEntry) => builder.addPoint(createWayPointWith(gpsEntry))
       }
     val trackSegment: TrackSegment = foldedTrackBuilder.build()
-    val track: Track = Track.builder().addSegment(trackSegment).build()
+    val track: Track = Track.builder()
+      .name(fileName.dropWhile(_ != '_').tail.dropRight(4))
+      .addSegment(trackSegment).build()
       val finalGpxValue = GPX.builder()
                 .addTrack(track)
         .build()
-    GPX.writer("  ").write(finalGpxValue, fileName)
+    GPX.writer("  ")
+      .write(finalGpxValue, s"CONVERTED_$fileName")
   }
 
   implicit val instantReads:  zamblauskas.csv.parser.Reads[java.time.Instant] = new Reads[Instant] {
@@ -116,6 +119,37 @@ object Main extends App {
                  |23.52423,33.125269,2007-12-03T10:15:30.00Z
           """.stripMargin
 
+  def fullFileProcess(file: File) = {
+    for {
+      _ <- putStrLn(file.name)
+      rawJsonData <- getRawJsonFromDataScriptInFile(file)
+      typedGpsCoordinates <- ZIO {
+        parseCoordinatesFromRawJson(rawJsonData)
+      }
+      _ <- putStrLn("Number of coordinates " + typedGpsCoordinates.length)
+      startedAt <- ZIO {
+        parseStartTimeFromRawJson(rawJsonData)
+      }
+      endedAt <- ZIO {
+        parseEndTimeFromRawJson(rawJsonData)
+      }
+      duration <- ZIO {
+        Duration.between(startedAt, endedAt)
+      }
+      durationPerStep <- ZIO {
+        duration.dividedBy(typedGpsCoordinates.length)
+      }
+      timestampedGpsCoordinates <- ZIO {
+        typedGpsCoordinates
+          .zipWithIndex
+          .map { case (gpsEntry, index) => TimestampedGpsEntry(gpsEntry, startedAt.plus(durationPerStep.multipliedBy(index))) }
+      }
+      _ <- writeGpxDataToFile(file.name, timestampedGpsCoordinates)
+    } yield {
+      ()
+    }
+  }
+
   override def run(args: List[String]): ZIO[Environment, Nothing, Int] = {
     //    val liveDefaultEnvironment: Environment =
     //      new Clock.Live with Console.Live with System.Live with Random.Live
@@ -125,24 +159,7 @@ object Main extends App {
       for {
         result <- ZIO {Parser.parse[Person](csv)}
         files <- getInputFiles()
-        _ <- putStrLn(files(0).name)
-        rawJsonData <- getRawJsonFromDataScriptInFile(files(0))
-        typedGpsCoordinates <- ZIO {parseCoordinatesFromRawJson(rawJsonData) }
-        _ <- putStrLn( "Number of coordinates " + typedGpsCoordinates.length)
-        startedAt <- ZIO { parseStartTimeFromRawJson(rawJsonData) }
-        endedAt <- ZIO { parseEndTimeFromRawJson(rawJsonData) }
-        duration <- ZIO { Duration.between(startedAt, endedAt)}
-        durationPerStep <- ZIO{ duration.dividedBy(typedGpsCoordinates.length) }
-        timestampedGpsCoordinates <- ZIO {
-          typedGpsCoordinates
-            .zipWithIndex
-            .map{ case (gpsEntry, index) => TimestampedGpsEntry(gpsEntry, startedAt.plus(durationPerStep.multipliedBy(index)))}
-        }
-        _ <- putStrLn("Real End time: " + endedAt)
-//        _ <- putStrLn(rawJsonData.toString)
-//        gpsResult <- ZIO {Parser.parse[GpsEntry](gpsCsv)}
-        _ <- writeGpxDataToFile("testFile", timestampedGpsCoordinates)
-//        _ <- putStrLn(s"CSV conversion result $gpsResult")
+        _ <- ZIO.collectAll(files.map(fullFileProcess))
       } yield (0)
     logic
       .provide(Environment)
