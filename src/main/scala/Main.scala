@@ -1,6 +1,5 @@
 package hello
 
-import zio.App
 import zio.console.putStrLn
 import io.jenetics.jpx.GPX
 import io.jenetics.jpx.Track
@@ -13,39 +12,15 @@ import zio.{App, ZIO}
 import zio.console._
 import zamblauskas.csv.parser._
 import better.files._
-import com.fasterxml.jackson.annotation.{JsonIgnoreProperties, JsonProperty}
-import com.fasterxml.jackson.core.JsonParser
-import com.fasterxml.jackson.module.scala.ScalaObjectMapper
 import net.ruippeixotog.scalascraper.browser.JsoupBrowser
 import net.ruippeixotog.scalascraper.dsl.DSL._
 import net.ruippeixotog.scalascraper.dsl.DSL.Extract._
-import net.ruippeixotog.scalascraper.dsl.DSL.Parse._
-import ujson.StringRenderer
-import upickle.default._
-
-import scala.beans.BeanProperty
 
 case class Person(name: String, age: Int, city: Option[String])
 
 
 case class GpsEntry(latitude: Double, longitude: Double, altitude: Double)
-
-@JsonIgnoreProperties(ignoreUnknown = true)
-case class GpsTrack(
-                    @JsonProperty("id") val int: Int
-                  )
-
-
-@JsonIgnoreProperties(ignoreUnknown = true)
-case class GpsData(
-                           @JsonProperty("track") val track: GpsTrack
-                         )
-
-@JsonIgnoreProperties(ignoreUnknown = true)
-case class FullGpsPayload(
-                   @JsonProperty("layout") val layout: String,
-                     @JsonProperty("data") val data: Array[GpsData]
-                 )
+case class TimestampedGpsEntry(gpsEntry: GpsEntry, timestamp: Instant)
 
 object Main extends App {
   val browser = JsoupBrowser()
@@ -54,9 +29,9 @@ object Main extends App {
     val coordinatesRegex =
       """.*startedAt:\"([^\"]*)\".*""".r
     Instant.parse(
-    input.toString match {
-      case coordinatesRegex(coordinates) => coordinates
-    }
+      input.toString match {
+        case coordinatesRegex(coordinates) => coordinates
+      }
     )
   }
 
@@ -103,22 +78,25 @@ object Main extends App {
       .toList
   }
 
-  def writeGpxDataToFile(fileName: String) = ZIO {
-//    JavaGPX.writeToFile(
-    val wayPoint: WayPoint = WayPoint.builder()
-      .ele(23.23)
-      .build(45.2323, 62.2343242)
-    val trackSegment: TrackSegment = TrackSegment.builder().addPoint(wayPoint).build()
+  def createWayPointWith(gpsEntry: TimestampedGpsEntry) = {
+    WayPoint.builder()
+      .ele(gpsEntry.gpsEntry.altitude)
+      .time(gpsEntry.timestamp)
+      .build(gpsEntry.gpsEntry.longitude, gpsEntry.gpsEntry.latitude) // TODO ARE THESE BACKWARDS??
+
+  }
+
+  def writeGpxDataToFile(fileName: String, gpsEntries: Array[TimestampedGpsEntry]) = ZIO {
+    val foldedTrackBuilder = gpsEntries
+      .foldLeft(TrackSegment.builder()) {
+        case (builder, gpsEntry) => builder.addPoint(createWayPointWith(gpsEntry))
+      }
+    val trackSegment: TrackSegment = foldedTrackBuilder.build()
     val track: Track = Track.builder().addSegment(trackSegment).build()
       val finalGpxValue = GPX.builder()
                 .addTrack(track)
-        //          .addSegment(segment => segment
-        //            .addPoint(p => p.lat(48.2081743).lon(16.3738189).ele(160))
-        //            .addPoint(p => p.lat(48.2081743).lon(16.3738189).ele(161))
-        //            .addPoint(p => p.lat(48.2081743).lon(16.3738189).ele(162))))
         .build()
-//      , fileName)
-    GPX.write(finalGpxValue, fileName)
+    GPX.writer("  ").write(finalGpxValue, fileName)
   }
 
   implicit val instantReads:  zamblauskas.csv.parser.Reads[java.time.Instant] = new Reads[Instant] {
@@ -155,17 +133,15 @@ object Main extends App {
         endedAt <- ZIO { parseEndTimeFromRawJson(rawJsonData) }
         duration <- ZIO { Duration.between(startedAt, endedAt)}
         durationPerStep <- ZIO{ duration.dividedBy(typedGpsCoordinates.length) }
-        _ <- ZIO {
+        timestampedGpsCoordinates <- ZIO {
           typedGpsCoordinates
             .zipWithIndex
-            .map{ case (gpsEntry, index) => startedAt.plus(durationPerStep.multipliedBy(index))}
-            .foreach(println)
-
+            .map{ case (gpsEntry, index) => TimestampedGpsEntry(gpsEntry, startedAt.plus(durationPerStep.multipliedBy(index)))}
         }
         _ <- putStrLn("Real End time: " + endedAt)
 //        _ <- putStrLn(rawJsonData.toString)
 //        gpsResult <- ZIO {Parser.parse[GpsEntry](gpsCsv)}
-        _ <- writeGpxDataToFile("testFile")
+        _ <- writeGpxDataToFile("testFile", timestampedGpsCoordinates)
 //        _ <- putStrLn(s"CSV conversion result $gpsResult")
       } yield (0)
     logic
