@@ -35,14 +35,44 @@ case class GpsEntry(latitude: Double, longitude: Double, createdOn: Instant)
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 case class GpsTrack(
-                   @JsonProperty("layout") val layout: String
-//                     @JsonProperty("data") val data: Array[Object]
+                    @JsonProperty("id") val int: Int
+                  )
+
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+case class GpsData(
+                           @JsonProperty("track") val track: GpsTrack
+                         )
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+case class FullGpsPayload(
+                   @JsonProperty("layout") val layout: String,
+                     @JsonProperty("data") val data: Array[GpsData]
                  )
 
 object Main extends App {
   val browser = JsoupBrowser()
 
-  def parseRawJson(input: String) = {
+  def parseRawJson(input: String) = { // with shitty bogus regexes
+    import collection.JavaConverters._
+    import java.util
+    val jso: util.Map[String, AnyRef] = Json.parseJSON(input)
+    val dataValue = jso
+      .entrySet()
+      .asScala
+      .filter( entry => entry.getKey == "data")
+      .map(_.getValue)
+      .head
+    println("Start of data: " + dataValue.toString.take(1200))
+    val coordinatesRegex =
+      """.*coordinates:\[\[\[(.*)\]\]\].*""".r
+    input.toString match {
+      case coordinatesRegex(coordinates) => println("coordinates: " + coordinates)
+      case unmatched => println("Failed to match.")
+    }
+  }
+
+  def parseRawJson2(input: String) = {
     import com.fasterxml.jackson.databind.ObjectMapper
     import com.fasterxml.jackson.core.JsonFactory
     import java.io.FileInputStream
@@ -50,7 +80,7 @@ object Main extends App {
     factory.configure(JsonParser.Feature.ALLOW_UNQUOTED_FIELD_NAMES, true)
     val jp = factory.createParser(input)
     val mapper = new ObjectMapper with ScalaObjectMapper
-    val typedResult = mapper.readValue[GpsTrack](jp)
+    val typedResult = mapper.readValue[FullGpsPayload](jp)
     println(typedResult)
 
 //    val parsedJson = mapper.readTree(input)
@@ -72,7 +102,6 @@ object Main extends App {
       .map( content => content.drop(1).dropRight(1))
       .map( content => content.dropWhile( _ != '{').reverse.dropWhile( _ != '}').reverse)
       .head
-    println(result)
     result
   }
 
@@ -126,7 +155,7 @@ object Main extends App {
         files <- getInputFiles()
         rawJsonData <- getRawJsonFromDataScriptInFile(files(0))
         _ <- ZIO {parseRawJson(rawJsonData) }
-        _ <- putStrLn(rawJsonData.toString)
+//        _ <- putStrLn(rawJsonData.toString)
         gpsResult <- ZIO {Parser.parse[GpsEntry](gpsCsv)}
         _ <- writeGpxDataToFile("testFile")
         _ <- putStrLn(s"CSV conversion result $gpsResult")
