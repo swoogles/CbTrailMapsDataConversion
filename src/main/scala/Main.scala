@@ -5,19 +5,15 @@ import io.jenetics.jpx.GPX
 import io.jenetics.jpx.Track
 import io.jenetics.jpx.TrackSegment
 import io.jenetics.jpx.WayPoint
-import java.io
+import java.io.Serializable
 import java.time.{Duration, Instant}
 
 import zio.{App, Task, ZIO}
 import zio.console._
-import zamblauskas.csv.parser._
-import better.files._
+import better.files.File
 import net.ruippeixotog.scalascraper.browser.JsoupBrowser
 import net.ruippeixotog.scalascraper.dsl.DSL._
-import net.ruippeixotog.scalascraper.dsl.DSL.Extract._
-
-case class Person(name: String, age: Int, city: Option[String])
-
+import net.ruippeixotog.scalascraper.dsl.DSL.Extract.elementList // Expand to wild-card of this package, if needed
 
 case class GpsEntry(latitude: Double, longitude: Double, altitude: Double)
 case class TimestampedGpsEntry(gpsEntry: GpsEntry, timestamp: Instant)
@@ -25,35 +21,35 @@ case class TimestampedGpsEntry(gpsEntry: GpsEntry, timestamp: Instant)
 object Main extends App {
   val browser = JsoupBrowser()
 
-  def parseStartTimeFromRawJson(input: String) = { // with shitty bogus regexes
-    val coordinatesRegex =
-      """.*startedAt:\"([^\"]*)\".*""".r
+  private val startedAtRegex =
+    """.*startedAt:\"([^\"]*)\".*""".r
+  def parseStartTimeFromRawJson(input: String) =
     Instant.parse(
       input.toString match {
-        case coordinatesRegex(coordinates) => coordinates
+        case startedAtRegex(coordinates) => coordinates
       }
     )
-  }
 
-  def parseEndTimeFromRawJson(input: String) = { // with shitty bogus regexes
-    val coordinatesRegex =
-      """.*endedAt:\"([^\"]*)\".*""".r
+  private val endedAtRegex =
+    """.*endedAt:\"([^\"]*)\".*""".r
+
+  def parseEndTimeFromRawJson(input: String) =
     Instant.parse(
-    input.toString match {
-      case coordinatesRegex(coordinates) => coordinates
-    }
+      input.toString match {
+        case endedAtRegex(coordinates) => coordinates
+      }
     )
-  }
+
+  private val coordinatesRegex =
+    """.*coordinates:\[\[\[(.*)\]\]\].*""".r
 
   def parseCoordinatesFromRawJson(input: String) = { // with shitty bogus regexes
-    val coordinatesRegex =
-      """.*coordinates:\[\[\[(.*)\]\]\].*""".r
     val formattedCoordinates = input.toString match {
       case coordinatesRegex(coordinates) => coordinates
     }
     formattedCoordinates
       .split("""],\[""")
-      .filter(_.forall(character=>character.isDigit || character == ',' || character == '.' || character == '-')) // Dunno WTF this is doing in the GPS data
+      .filter(_.forall(character=>character.isDigit || character == ',' || character == '.' || character == '-')) // There's all kinds of garbage in the GPS data
       .map(coords => {
         val coordFields = coords.split(",")
         GpsEntry(coordFields(0).toDouble, coordFields(1).toDouble, coordFields(2).toDouble)
@@ -83,7 +79,6 @@ object Main extends App {
       .ele(gpsEntry.gpsEntry.altitude)
       .time(gpsEntry.timestamp)
       .build(gpsEntry.gpsEntry.longitude, gpsEntry.gpsEntry.latitude) // TODO ARE THESE BACKWARDS??
-
   }
 
   def writeGpxDataToFile(fileName: String, gpsEntries: Array[TimestampedGpsEntry]) = ZIO {
@@ -95,29 +90,12 @@ object Main extends App {
     val track: Track = Track.builder()
       .name(fileName.dropWhile(_ != '_').tail.dropRight(4))
       .addSegment(trackSegment).build()
-      val finalGpxValue = GPX.builder()
-                .addTrack(track)
-        .build()
+    val finalGpxValue = GPX.builder()
+      .addTrack(track)
+      .build()
     GPX.writer("  ")
       .write(finalGpxValue, s"CONVERTED_$fileName")
   }
-
-  implicit val instantReads:  zamblauskas.csv.parser.Reads[java.time.Instant] = new Reads[Instant] {
-    def read(column: Column): ReadResult[Instant] = {
-      ReadSuccess(Instant.parse(column.value))
-    }
-
-  }
-  val csv = """
-              |name,age,height,city
-              |Emily,33,169,London
-              |Thomas,25,,
-          """.stripMargin
-
-  val gpsCsv = """
-                 |latitude,longitude,createdOn
-                 |23.52423,33.125269,2007-12-03T10:15:30.00Z
-          """.stripMargin
 
   def fullFileProcess(file: File) = {
     for {
@@ -151,13 +129,8 @@ object Main extends App {
   }
 
   override def run(args: List[String]): ZIO[Environment, Nothing, Int] = {
-    //    val liveDefaultEnvironment: Environment =
-    //      new Clock.Live with Console.Live with System.Live with Random.Live
-    //     = Environment.console
-
-    val logic: ZIO[Console, io.Serializable, Int] =
+    val logic: ZIO[Console, Serializable, Int] =
       for {
-        result <- ZIO {Parser.parse[Person](csv)}
         files <- getInputFiles()
         _ <- ZIO.collectAll(files.map(fullFileProcess))
       } yield (0)
@@ -165,7 +138,6 @@ object Main extends App {
       .provide(Environment)
       .fold(failure => {
         println("Failure: " + failure)
-        println("ouch!")
         1
       }, _ => {
         0
