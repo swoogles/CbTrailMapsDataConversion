@@ -23,27 +23,30 @@ object Main extends App {
 
   private val startedAtRegex =
     """.*startedAt:\"([^\"]*)\".*""".r
-  def parseStartTimeFromRawJson(input: String) =
+
+  def parseStartTimeFromRawJson(input: String) = ZIO {
     Instant.parse(
       input.toString match {
         case startedAtRegex(coordinates) => coordinates
       }
     )
+  }
 
   private val endedAtRegex =
     """.*endedAt:\"([^\"]*)\".*""".r
 
-  def parseEndTimeFromRawJson(input: String) =
+  def parseEndTimeFromRawJson(input: String) = ZIO {
     Instant.parse(
       input.toString match {
         case endedAtRegex(coordinates) => coordinates
       }
     )
+  }
 
   private val coordinatesRegex =
     """.*coordinates:\[\[\[(.*)\]\]\].*""".r
 
-  def parseCoordinatesFromRawJson(input: String) = { // with shitty bogus regexes
+  def parseCoordinatesFromRawJson(input: String) = ZIO { // with shitty bogus regexes
     val formattedCoordinates = input.toString match {
       case coordinatesRegex(coordinates) => coordinates
     }
@@ -97,27 +100,17 @@ object Main extends App {
       .write(finalGpxValue, s"CONVERTED_$fileName")
   }
 
-  def fullFileProcess(file: File) = {
+  def fullFileProcess(file: File) =
     for {
       _ <- putStrLn(file.name)
       rawJsonData <- getRawJsonFromDataScriptInFile(file)
-      typedGpsCoordinates <- ZIO {
-        parseCoordinatesFromRawJson(rawJsonData)
-      }
+      typedGpsCoordinates <- parseCoordinatesFromRawJson(rawJsonData)
       _ <- putStrLn("Number of coordinates " + typedGpsCoordinates.length)
-      startedAt <- ZIO {
-        parseStartTimeFromRawJson(rawJsonData)
-      }
-      endedAt <- ZIO {
-        parseEndTimeFromRawJson(rawJsonData)
-      }
-      duration <- ZIO {
-        Duration.between(startedAt, endedAt)
-      }
-      durationPerStep <- ZIO {
-        duration.dividedBy(typedGpsCoordinates.length)
-      }
+      startedAt <- parseStartTimeFromRawJson(rawJsonData)
+      endedAt <- parseEndTimeFromRawJson(rawJsonData)
       timestampedGpsCoordinates <- ZIO {
+        val duration = Duration.between(startedAt, endedAt)
+        val durationPerStep = duration.dividedBy(typedGpsCoordinates.length)
         typedGpsCoordinates
           .zipWithIndex
           .map { case (gpsEntry, index) => TimestampedGpsEntry(gpsEntry, startedAt.plus(durationPerStep.multipliedBy(index))) }
@@ -126,7 +119,6 @@ object Main extends App {
     } yield {
       ()
     }
-  }
 
   override def run(args: List[String]): ZIO[Environment, Nothing, Int] = {
     val logic: ZIO[Console, Serializable, Int] =
