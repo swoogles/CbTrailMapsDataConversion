@@ -97,7 +97,7 @@ object Main extends App {
       .addTrack(track)
       .build()
     GPX.writer("  ")
-      .write(finalGpxValue, s"CONVERTED_$fileName")
+      .write(finalGpxValue, s"CONVERTED_$fileName".replace("txt", "gpx"))
   }
 
   def fullFileProcess(file: File) =
